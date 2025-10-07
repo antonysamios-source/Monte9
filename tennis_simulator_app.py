@@ -1,133 +1,130 @@
 import streamlit as st
-    import pandas as pd
-    import numpy as np
-    import random
+import pandas as pd
+import numpy as np
+import random
 
-    st.set_page_config(layout="wide")
+# Title
+st.title("🎾 Monte Carlo Tennis Match Simulator (Monte9)")
 
-    # Load player stats
-    @st.cache_data
-    def load_data():
-        return pd.read_csv("player_surface_stats_master.csv")
+# Sidebar: Config
+st.sidebar.header("Match Settings")
+best_of = st.sidebar.radio("Match Format", [3, 5], horizontal=True)
+surface = st.sidebar.selectbox("Surface", ["Hard", "Clay", "Grass"])
+tour = st.sidebar.radio("Tour", ["ATP", "WTA"], horizontal=True)
+pressure_toggle = st.sidebar.checkbox("Enable Pressure-Aware Simulation", value=True)
 
-    df = load_data()
+# Load Data
+@st.cache_data
+def load_data():
+    return pd.read_csv("player_surface_stats_master.csv")
 
-    # --- Layout styling ---
-    st.markdown("""
-        <style>
-        .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-        .css-1y0tads {
-            gap: 0.25rem !important;
-        }
-        .stNumberInput input {
-            height: 1.2em;
-            font-size: 12px;
-            padding: 0.2em;
-        }
-        .stSelectbox > div {
-            font-size: 12px !important;
-        }
-        .stSlider {
-            padding: 0px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+stats_df = load_data()
 
-    st.title("🎾 Monte Carlo Tennis Match Simulator (Monte7)")
+# Player Selection
+player_a = st.selectbox("Select Player A", sorted(stats_df["player"].unique()), key="a")
+player_b = st.selectbox("Select Player B", sorted(stats_df["player"].unique()), key="b")
 
-    # Match configuration
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-    with col1:
-        match_format = st.radio("Match Format", [3, 5], horizontal=True)
-    with col2:
-        surface = st.selectbox("Surface", ["Hard", "Clay", "Grass"])
-    with col3:
-        tour = st.radio("Tour", ["ATP", "WTA"], horizontal=True)
-    with col4:
-        pressure_on = st.checkbox("Pressure Logic ON", value=True)
+if player_a == player_b:
+    st.warning("Please select two different players.")
 
-    players = df[(df["tour"] == tour) & (df["surface"] == surface)]["player"].unique()
-    col5, col6 = st.columns(2)
-    with col5:
-        player_a = st.selectbox("Select Player A", sorted(players), key="a")
-    with col6:
-        player_b = st.selectbox("Select Player B", sorted(players), key="b")
+# Get Serve/Return Stats
+def get_player_stats(player):
+    row = stats_df[(stats_df["player"] == player) & (stats_df["surface"] == surface) & (stats_df["tour"] == tour)]
+    return float(row["serve_win"].values[0]), float(row["return_win"].values[0])
 
-    def get_stats(player):
-        stats = df[(df["player"] == player) & (df["surface"] == surface)]
-        return float(stats["serve_win"]), float(stats["return_win"])
+sa_serve, sa_return = get_player_stats(player_a)
+sb_serve, sb_return = get_player_stats(player_b)
 
-    sa_serve, sa_return = get_stats(player_a)
-    sb_serve, sb_return = get_stats(player_b)
+# Live Scoreboard (compact input grid)
+st.markdown("### 🟩 Live Scoreboard")
+col1, col2 = st.columns(2)
+with col1:
+    sets_a = st.number_input("Sets Won (A)", 0, best_of//2, step=1, key="sa")
+    games_a = st.number_input("Games (A)", 0, 7, step=1, key="ga")
+    points_a = st.number_input("Points (A)", 0, 4, step=1, key="pa")
+with col2:
+    sets_b = st.number_input("Sets Won (B)", 0, best_of//2, step=1, key="sb")
+    games_b = st.number_input("Games (B)", 0, 7, step=1, key="gb")
+    points_b = st.number_input("Points (B)", 0, 4, step=1, key="pb")
 
-    # Scoreboard
-    st.markdown("### 🟩 Live Scoreboard")
-    score_cols = st.columns([1, 1, 1, 1, 1, 1])
-    sets_a = score_cols[0].number_input("Sets A", min_value=0, step=1, key="sa")
-    games_a = score_cols[1].number_input("Games A", min_value=0, step=1, key="ga")
-    points_a = score_cols[2].number_input("Points A", min_value=0, max_value=4, step=1, key="pa")
-    sets_b = score_cols[3].number_input("Sets B", min_value=0, step=1, key="sb")
-    games_b = score_cols[4].number_input("Games B", min_value=0, step=1, key="gb")
-    points_b = score_cols[5].number_input("Points B", min_value=0, max_value=4, step=1, key="pb")
+# Odds Input (compact)
+st.markdown("### 💰 Odds & Betting Setup")
+col3, col4 = st.columns(2)
+with col3:
+    odds_a = st.number_input("Back Odds for " + player_a, value=2.0, step=0.01, key="odds_a")
+    lay_a = st.number_input("Lay Odds for " + player_a, value=2.2, step=0.01, key="lay_a")
+with col4:
+    odds_b = st.number_input("Back Odds for " + player_b, value=2.0, step=0.01, key="odds_b")
+    lay_b = st.number_input("Lay Odds for " + player_b, value=2.2, step=0.01, key="lay_b")
 
-    def simulate_match(sa_s, sa_r, sb_s, sb_r, pressure, sets_a, sets_b, games_a, games_b, points_a, points_b):
-        wins_a, wins_b = 0, 0
-        for _ in range(100_000):
-            p1_sets, p2_sets = sets_a, sets_b
-            p1_games, p2_games = games_a, games_b
-            p1_points, p2_points = points_a, points_b
+bankroll = st.number_input("💵 Starting Bankroll (£)", value=1000.0, step=10.0)
+use_half_kelly = st.checkbox("Use Half Kelly", value=False)
 
-            while p1_sets < (match_format // 2 + 1) and p2_sets < (match_format // 2 + 1):
-                p1_games, p2_games = 0, 0
-                while p1_games < 6 and p2_games < 6:
-                    p1_points, p2_points = 0, 0
-                    while True:
-                        p_server = sa_s if random.random() < 0.5 else sb_s
-                        if random.random() < p_server:
-                            p1_points += 1
-                        else:
-                            p2_points += 1
-                        if p1_points >= 4 and p1_points - p2_points >= 2:
-                            p1_games += 1
-                            break
-                        if p2_points >= 4 and p2_points - p1_points >= 2:
-                            p2_games += 1
-                            break
-                if p1_games > p2_games:
-                    p1_sets += 1
+# Monte Carlo Simulation
+def simulate_match(sa, sb, serve_win_a, return_win_a, serve_win_b, return_win_b):
+    wins_a = 0
+    iterations = 100000
+    for _ in range(iterations):
+        score_a, score_b = sa, sb
+        games_a_sim, games_b_sim = games_a, games_b
+        sets_to_win = best_of // 2 + 1
+        while score_a < sets_to_win and score_b < sets_to_win:
+            games_a_set, games_b_set = 0, 0
+            while (games_a_set < 6 and games_b_set < 6) or abs(games_a_set - games_b_set) < 2:
+                if random.random() < serve_win_a:
+                    games_a_set += 1
                 else:
-                    p2_sets += 1
-
-            if p1_sets > p2_sets:
-                wins_a += 1
+                    games_b_set += 1
+            if pressure_toggle and (games_a_set == 5 or games_b_set == 5):
+                if random.random() < (serve_win_a * 1.05):
+                    score_a += 1
+                else:
+                    score_b += 1
             else:
-                wins_b += 1
+                if games_a_set > games_b_set:
+                    score_a += 1
+                else:
+                    score_b += 1
+        if score_a > score_b:
+            wins_a += 1
+    return wins_a / iterations
 
-        return wins_a / 100_000, wins_b / 100_000
+# Run simulation
+win_prob = simulate_match(sets_a, sets_b, sa_serve, sa_return, sb_serve, sb_return)
 
-    wp_a, wp_b = simulate_match(sa_serve, sa_return, sb_serve, sb_return, pressure_on,
-                                sets_a, sets_b, games_a, games_b, points_a, points_b)
+# Display
+st.subheader("📈 Match Win Probability")
+st.write(f"{player_a}: **{win_prob*100:.2f}%**  |  {player_b}: **{(1-win_prob)*100:.2f}%**")
 
-    st.markdown("### 💰 Odds & Betting Setup")
-    col7, col8 = st.columns(2)
-    with col7:
-        odds_back_a = st.number_input(f"Back Odds for {player_a}", value=2.0, step=0.01, key="oba")
-        odds_lay_a = st.number_input(f"Lay Odds for {player_a}", value=2.2, step=0.01, key="ola")
-    with col8:
-        odds_back_b = st.number_input(f"Back Odds for {player_b}", value=2.0, step=0.01, key="obb")
-        odds_lay_b = st.number_input(f"Lay Odds for {player_b}", value=2.2, step=0.01, key="olb")
+# EV + Kelly
+def implied_prob(odds):
+    return 1 / odds if odds > 0 else 0
 
-    def implied_prob(odds): return 1 / odds if odds > 0 else 0
-    imp_a, imp_b = implied_prob(odds_back_a), implied_prob(odds_back_b)
+ip_a = implied_prob(odds_a)
+ip_b = implied_prob(odds_b)
+edge_a = win_prob - ip_a
+edge_b = (1 - win_prob) - ip_b
 
-    edge_a = wp_a - imp_a
-    edge_b = wp_b - imp_b
+def kelly_fraction(p, b):
+    return (p * (b + 1) - 1) / b if b > 0 else 0
 
-    st.markdown(f"#### ✅ Win Probabilities
-- {player_a}: {wp_a:.2%} | EV vs Back: {edge_a:.2%}
-- {player_b}: {wp_b:.2%} | EV vs Back: {edge_b:.2%}")
+stake = 0
+side = ""
+if edge_a > 0:
+    k = kelly_fraction(win_prob, odds_a - 1)
+    stake = max(2, (k / 2 if use_half_kelly else k) * bankroll)
+    side = f"✅ Back {player_a}"
+elif edge_b > 0:
+    k = kelly_fraction(1 - win_prob, odds_b - 1)
+    stake = max(2, (k / 2 if use_half_kelly else k) * bankroll)
+    side = f"✅ Back {player_b}"
+
+# Output
+st.subheader("🎯 Suggested Bet")
+if stake > 0:
+    st.success(f"{side} | Stake: £{stake:.2f}")
+else:
+    st.info("No +EV bet found.")
+
+# Done
+
