@@ -1,141 +1,150 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import random
+import matplotlib.pyplot as plt
 
-# Title
-st.title("🎾 Monte Carlo Tennis Match Simulator (Monte9)")
-
-# Sidebar: Config
-st.sidebar.header("Match Settings")
-best_of = st.sidebar.radio("Match Format", [3, 5], horizontal=True)
-surface = st.sidebar.selectbox("Surface", ["Hard", "Clay", "Grass"])
-tour = st.sidebar.radio("Tour", ["ATP", "WTA"], horizontal=True)
-pressure_toggle = st.sidebar.checkbox("Enable Pressure-Aware Simulation", value=True)
-
-# Load Data
+# --- Load player stats ---
 @st.cache_data
 def load_data():
-    return pd.read_csv("player_surface_stats_master.csv")
+    df = pd.read_csv("player_surface_stats_master.csv")
+    return df
 
-stats_df = load_data()
+df = load_data()
 
-# Ensure at least two players are available
-available_players = sorted(stats_df["player"].unique())
-default_player_a = available_players[0]
-default_player_b = available_players[1] if len(available_players) > 1 else available_players[0]
+# --- App Configuration ---
+st.set_page_config(page_title="Monte Carlo Tennis Simulator", layout="centered")
+st.title("🎾 Monte Carlo Tennis Match Simulator (Monte10)")
 
-# Player Selection
-player_a = st.selectbox("Select Player A", available_players, index=0, key="a")
-player_b = st.selectbox("Select Player B", available_players, index=1, key="b")
+# --- UI Layout ---
+col1, col2, col3 = st.columns(3)
+with col1:
+    match_format = st.radio("Match Format", ["Best of 3", "Best of 5"])
+with col2:
+    tour = st.radio("Tour", ["ATP", "WTA"])
+with col3:
+    surface = st.selectbox("Surface", ["Hard", "Clay", "Grass"])
 
-# Check if players are different
-if player_a == player_b:
-    st.warning("Please select two different players to simulate.")
-    st.stop()
+best_of_sets = 3 if match_format == "Best of 3" else 5
 
-# Get Serve/Return Stats
-def get_player_stats(player):
-    row = stats_df[(stats_df["player"] == player) &
-                   (stats_df["surface"] == surface) &
-                   (stats_df["tour"] == tour)]
-    if row.empty:
-        st.error(f"No stats found for {player} on {surface} ({tour}).")
-        st.stop()
-    return float(row["serve_win"].values[0]), float(row["return_win"].values[0])
+filtered_df = df[(df["tour"] == tour) & (df["surface"] == surface)]
+players = sorted(filtered_df["player"].unique())
 
-sa_serve, sa_return = get_player_stats(player_a)
-sb_serve, sb_return = get_player_stats(player_b)
-
-# Live Scoreboard (compact input grid)
-st.markdown("### 🟩 Live Scoreboard")
 col1, col2 = st.columns(2)
 with col1:
-    sets_a = st.number_input("Sets Won (A)", 0, best_of//2, step=1, key="sa")
-    games_a = st.number_input("Games (A)", 0, 7, step=1, key="ga")
-    points_a = st.number_input("Points (A)", 0, 4, step=1, key="pa")
+    player_a = st.selectbox("Select Player A", players, index=0)
 with col2:
-    sets_b = st.number_input("Sets Won (B)", 0, best_of//2, step=1, key="sb")
-    games_b = st.number_input("Games (B)", 0, 7, step=1, key="gb")
-    points_b = st.number_input("Points (B)", 0, 4, step=1, key="pb")
+    player_b = st.selectbox("Select Player B", players, index=1 if len(players) > 1 else 0)
 
-# Odds Input (compact)
-st.markdown("### 💰 Odds & Betting Setup")
-col3, col4 = st.columns(2)
-with col3:
-    odds_a = st.number_input("Back Odds for " + player_a, value=2.0, step=0.01, key="odds_a")
-    lay_a = st.number_input("Lay Odds for " + player_a, value=2.2, step=0.01, key="lay_a")
-with col4:
-    odds_b = st.number_input("Back Odds for " + player_b, value=2.0, step=0.01, key="odds_b")
-    lay_b = st.number_input("Lay Odds for " + player_b, value=2.2, step=0.01, key="lay_b")
+if player_a == player_b:
+    st.warning("Choose two different players.")
+    st.stop()
 
-bankroll = st.number_input("💵 Starting Bankroll (£)", value=1000.0, step=10.0)
-use_half_kelly = st.checkbox("Use Half Kelly", value=False)
+# --- Get player stats ---
+def get_stats(name):
+    row = filtered_df[filtered_df["player"] == name]
+    return float(row["serve_win_pct"].values[0]), float(row["return_win_pct"].values[0])
 
-# Monte Carlo Simulation
-def simulate_match(sa, sb, serve_win_a, return_win_a, serve_win_b, return_win_b):
-    wins_a = 0
-    iterations = 100000
-    for _ in range(iterations):
-        score_a, score_b = sa, sb
-        games_a_sim, games_b_sim = games_a, games_b
-        sets_to_win = best_of // 2 + 1
-        while score_a < sets_to_win and score_b < sets_to_win:
-            games_a_set, games_b_set = 0, 0
-            while (games_a_set < 6 and games_b_set < 6) or abs(games_a_set - games_b_set) < 2:
-                if random.random() < serve_win_a:
-                    games_a_set += 1
-                else:
-                    games_b_set += 1
-            if pressure_toggle and (games_a_set == 5 or games_b_set == 5):
-                if random.random() < (serve_win_a * 1.05):
-                    score_a += 1
-                else:
-                    score_b += 1
-            else:
-                if games_a_set > games_b_set:
-                    score_a += 1
-                else:
-                    score_b += 1
-        if score_a > score_b:
-            wins_a += 1
-    return wins_a / iterations
+sa_serve, sa_return = get_stats(player_a)
+sb_serve, sb_return = get_stats(player_b)
 
-# Run simulation
-win_prob = simulate_match(sets_a, sets_b, sa_serve, sa_return, sb_serve, sb_return)
+# --- Scoreboard ---
+st.markdown("#### 🟩 Live Scoreboard")
+sc1, sc2 = st.columns(2)
+with sc1:
+    sets_a = st.number_input("Sets A", min_value=0, max_value=best_of_sets, value=0)
+    games_a = st.number_input("Games A", min_value=0, max_value=6, value=0)
+    points_a = st.number_input("Points A", min_value=0, max_value=3, value=0)
+with sc2:
+    sets_b = st.number_input("Sets B", min_value=0, max_value=best_of_sets, value=0)
+    games_b = st.number_input("Games B", min_value=0, max_value=6, value=0)
+    points_b = st.number_input("Points B", min_value=0, max_value=3, value=0)
 
-# Display
-st.subheader("📈 Match Win Probability")
-st.write(f"{player_a}: **{win_prob*100:.2f}%**  |  {player_b}: **{(1-win_prob)*100:.2f}%**")
+# --- Betting Setup ---
+st.markdown("#### 💰 Odds & EV")
+odds1, odds2 = st.columns(2)
+with odds1:
+    back_odds_a = st.number_input(f"Back Odds {player_a}", value=2.0)
+    lay_odds_a = st.number_input(f"Lay Odds {player_a}", value=2.2)
+with odds2:
+    back_odds_b = st.number_input(f"Back Odds {player_b}", value=2.0)
+    lay_odds_b = st.number_input(f"Lay Odds {player_b}", value=2.2)
 
-# EV + Kelly
-def implied_prob(odds):
-    return 1 / odds if odds > 0 else 0
+kelly_toggle = st.radio("Stake Strategy", ["Full Kelly", "Half Kelly"])
+bankroll = st.number_input("Bankroll (£)", min_value=2, value=100)
 
-ip_a = implied_prob(odds_a)
-ip_b = implied_prob(odds_b)
-edge_a = win_prob - ip_a
-edge_b = (1 - win_prob) - ip_b
+# --- Sim Functions ---
+def est_prob(sa, sr, sb, rr, sa_set, sa_game, sb_set, sb_game, pressure=True):
+    base_prob = sa * (1 - rr)
+    adj = 0.02 if pressure and sb_game >= 4 else 0
+    prob = 0.5 + (base_prob - sb * (1 - sr)) / 200 + adj + (sa_set - sb_set) * 0.1
+    return max(0.01, min(0.99, prob))
 
-def kelly_fraction(p, b):
-    return (p * (b + 1) - 1) / b if b > 0 else 0
+def monte(prob, n=100000):
+    return np.mean(np.random.rand(n) < prob)
 
-stake = 0
-side = ""
-if edge_a > 0:
-    k = kelly_fraction(win_prob, odds_a - 1)
-    stake = max(2, (k / 2 if use_half_kelly else k) * bankroll)
-    side = f"✅ Back {player_a}"
-elif edge_b > 0:
-    k = kelly_fraction(1 - win_prob, odds_b - 1)
-    stake = max(2, (k / 2 if use_half_kelly else k) * bankroll)
-    side = f"✅ Back {player_b}"
+def ev(prob, odds):
+    return (prob * (odds - 1)) - (1 - prob)
 
-# Output
-st.subheader("🎯 Suggested Bet")
-if stake > 0:
-    st.success(f"{side} | Stake: £{stake:.2f}")
-else:
-    st.info("No +EV bet found.")
+def kelly(prob, odds, roll, k_frac=1.0):
+    edge = ev(prob, odds)
+    if edge <= 0:
+        return 0
+    stake = roll * ((odds * prob - (1 - prob)) / (odds - 1)) * k_frac
+    return max(2, min(roll, stake))
+
+# --- Position & Log Tracking ---
+pnl_log = []
+sim_points = 100000
+
+if st.button("🎯 Simulate Match & Recommend Bets"):
+    prob_a = est_prob(sa_serve, sa_return, sb_serve, sb_return, sets_a, games_a, sets_b, games_b)
+    prob_b = 1 - prob_a
+
+    sim_a = monte(prob_a, sim_points)
+    sim_b = 1 - sim_a
+
+    st.markdown("### 📊 Results")
+    ca, cb = st.columns(2)
+
+    kf = 0.5 if kelly_toggle == "Half Kelly" else 1
+
+    with ca:
+        st.write(f"**{player_a} Win %:** {sim_a:.2%}")
+        st.write(f"Back Implied: {1/back_odds_a:.2%}")
+        st.write(f"Edge: {ev(sim_a, back_odds_a):.2%}")
+        stake = kelly(sim_a, back_odds_a, bankroll, kf)
+        if stake >= 2:
+            pnl_log.append({"Player": player_a, "Type": "BACK", "Stake": stake, "Prob": sim_a, "Odds": back_odds_a})
+            st.success(f"✅ BACK {player_a} with £{stake:.2f}")
+        else:
+            st.warning("❌ No positive EV.")
+
+    with cb:
+        st.write(f"**{player_b} Win %:** {sim_b:.2%}")
+        st.write(f"Back Implied: {1/back_odds_b:.2%}")
+        st.write(f"Edge: {ev(sim_b, back_odds_b):.2%}")
+        stake_b = kelly(sim_b, back_odds_b, bankroll, kf)
+        if stake_b >= 2:
+            pnl_log.append({"Player": player_b, "Type": "BACK", "Stake": stake_b, "Prob": sim_b, "Odds": back_odds_b})
+            st.success(f"✅ BACK {player_b} with £{stake_b:.2f}")
+        else:
+            st.warning("❌ No positive EV.")
+
+    # Graph
+    st.markdown("#### 📈 Probability Distribution")
+    fig, ax = plt.subplots()
+    ax.hist(np.random.binomial(1, sim_a, sim_points), bins=2, rwidth=0.5)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels([player_b, player_a])
+    ax.set_title("Monte Carlo Match Outcome")
+    st.pyplot(fig)
+
+    # P&L Table
+    if pnl_log:
+        st.markdown("#### 📋 P&L Log")
+        df_log = pd.DataFrame(pnl_log)
+        df_log["Expected Profit"] = df_log["Stake"] * (df_log["Prob"] * (df_log["Odds"] - 1) - (1 - df_log["Prob"]))
+        st.dataframe(df_log)
+
 
 
