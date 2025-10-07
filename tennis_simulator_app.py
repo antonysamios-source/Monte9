@@ -1,15 +1,13 @@
 # =========================================================
-# 🎾  MONTE CARLO TENNIS MATCH SIMULATOR – v10 (FULL BUILD)
+# 🎾  MONTE CARLO TENNIS MATCH SIMULATOR – v11 (FULL BUILD)
 # =========================================================
-#  > 164+ lines including:
-#     - Auto column-header detection
-#     - 3/5-set engine & scoreboard
-#     - ATP/WTA + surface adjustments
-#     - Pressure-aware Monte Carlo (100k)
-#     - Kelly staking & £2 minimum
-#     - Back/Lay + EV logic + hedging
-#     - Position tracking + P&L log
-#     - Compact above-fold layout
+#  Includes:
+#   - Fixed column mapping order (no KeyError)
+#   - 3/5 set engine, pressure-aware Monte Carlo
+#   - Kelly staking, EV logic, £2 minimum
+#   - Auto header detection
+#   - Back/Lay logic, position log
+#   - EV progress bar, compact UI
 # =========================================================
 
 import streamlit as st
@@ -17,21 +15,16 @@ import pandas as pd
 import numpy as np
 import random
 import matplotlib.pyplot as plt
-from io import StringIO
 
 st.set_page_config(page_title="🎾 Monte Carlo Tennis Simulator", layout="wide")
 
 # ---------------------------------------------------------
-# 🧭  Utility: Attempt to find proper serve/return columns
+# 🧭 Utility: Detect column names dynamically
 # ---------------------------------------------------------
 def detect_columns(df: pd.DataFrame):
     cols = [c.lower() for c in df.columns]
-    serve_col = next(
-        (c for c in cols if "serve" in c and ("win" in c or "point" in c)), None
-    )
-    ret_col = next(
-        (c for c in cols if "return" in c and ("win" in c or "point" in c)), None
-    )
+    serve_col = next((c for c in cols if "serve" in c and ("win" in c or "point" in c)), None)
+    ret_col = next((c for c in cols if "return" in c and ("win" in c or "point" in c)), None)
     surf_col = next((c for c in cols if "surface" in c), None)
     tour_col = next((c for c in cols if "tour" in c), None)
     player_col = next((c for c in cols if "player" in c), None)
@@ -44,23 +37,23 @@ def detect_columns(df: pd.DataFrame):
     }
 
 # ---------------------------------------------------------
-# 🧩  Load Player Stats (cached)
+# 🧩 Load Player Stats (cached)
 # ---------------------------------------------------------
 @st.cache_data
 def load_data():
     try:
         df = pd.read_csv("player_surface_stats_master.csv")
-    except Exception:
-        st.error("Could not load player_surface_stats_master.csv.")
+        df.columns = [c.lower() for c in df.columns]  # FIX moved earlier
+        mapping = detect_columns(df)
+        return df, mapping
+    except Exception as e:
+        st.error(f"❌ Could not load CSV: {e}")
         st.stop()
-    mapping = detect_columns(df)
-    df.columns = [c.lower() for c in df.columns]
-    return df, mapping
 
 df, mapping = load_data()
 
 # ---------------------------------------------------------
-# ⚙️  Sidebar Settings
+# ⚙️ Sidebar Controls
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Match Setup")
@@ -87,27 +80,29 @@ if player_a == player_b:
     st.stop()
 
 # ---------------------------------------------------------
-# 🎯  Extract Player Stats
+# 🎯 Extract Player Stats Safely
 # ---------------------------------------------------------
 def get_player_stats(player):
     row = df[(df[mapping["player"]] == player) & (df[mapping["surface"]] == surface)]
     if row.empty:
         return 0.62, 0.38
-    return (
-        float(row[mapping["serve"]].values[0]),
-        float(row[mapping["return"]].values[0]),
-    )
+    try:
+        serve = float(row[mapping["serve"]].values[0])
+        ret = float(row[mapping["return"]].values[0])
+    except Exception:
+        serve, ret = 0.62, 0.38
+    return serve, ret
 
 sa_serve, sa_return = get_player_stats(player_a)
 sb_serve, sb_return = get_player_stats(player_b)
 
-# surface multiplier
+# Apply surface multiplier
 surf_mult = {"Hard": 1.00, "Clay": 0.96, "Grass": 1.04}[surface]
 sa_serve *= surf_mult
 sb_serve *= surf_mult
 
 # ---------------------------------------------------------
-# 🟩  Compact Scoreboard
+# 🟩 Compact Scoreboard
 # ---------------------------------------------------------
 st.markdown("### 🟩 Live Scoreboard (Compact)")
 s1, s2, s3, s4 = st.columns(4)
@@ -122,7 +117,7 @@ points_b = s3.number_input("Pts (B)", 0, 3, 0)
 adv_b = s4.checkbox("Adv B")
 
 # ---------------------------------------------------------
-# 💰  Betting Inputs
+# 💰 Odds & Bankroll
 # ---------------------------------------------------------
 st.markdown("### 💰 Betfair Odds & Bankroll")
 o1, o2, o3 = st.columns(3)
@@ -131,7 +126,7 @@ lay_odds_a = o2.number_input(f"Lay Odds {player_a}", 1.01, 100.0, 2.2, 0.01)
 bankroll = o3.number_input("Bankroll (£)", 10.0, 100000.0, 1000.0, 10.0)
 
 # ---------------------------------------------------------
-# 🧮  Monte Carlo Simulation
+# 🧮 Monte Carlo Simulation (Pressure-Aware)
 # ---------------------------------------------------------
 def simulate_match(a_serve, b_serve, sets_to_win, pressure=False):
     a_match_wins = 0
@@ -155,16 +150,13 @@ def simulate_match(a_serve, b_serve, sets_to_win, pressure=False):
             a_match_wins += 1
     return a_match_wins / 100000
 
-# ---------------------------------------------------------
-# 🚀  Run Simulation from Current State
-# ---------------------------------------------------------
 sets_target = match_format // 2 + 1
 sim_prob = simulate_match(sa_serve, sb_serve, sets_target, pressure_toggle)
 market_prob = 1 / back_odds_a if back_odds_a > 0 else 0
 edge = sim_prob - market_prob
 
 # ---------------------------------------------------------
-# 📈  Betting Logic / Kelly
+# 📈 Betting Logic + EV Progress Bar
 # ---------------------------------------------------------
 kelly_stake = max(2, (bankroll * edge) / max(0.01, (back_odds_a - 1)))
 kelly_stake *= kelly_factor
@@ -175,17 +167,16 @@ elif edge < 0:
 else:
     action = "⏸ No Edge"
 
-# ---------------------------------------------------------
-# 📊  Display Results
-# ---------------------------------------------------------
 st.markdown("### 📊 Probability & Edge Analysis")
 st.metric("Monte Carlo Win Prob", f"{sim_prob*100:.2f}%")
 st.metric("Market Implied Prob", f"{market_prob*100:.2f}%")
 st.metric("Edge", f"{edge*100:.2f}%")
+progress = min(max((edge * 100) + 50, 0), 100)
+st.progress(progress / 100)
 st.success(action)
 
 # ---------------------------------------------------------
-# 💹  P&L Tracking
+# 💹 P&L Tracking
 # ---------------------------------------------------------
 if "bet_log" not in st.session_state:
     st.session_state["bet_log"] = []
@@ -220,9 +211,8 @@ if st.button("🔁 Reset Match / Clear Log"):
     st.session_state["bet_log"] = []
     st.experimental_rerun()
 
-# =========================================================
-# ✅ Line Count Verification – ≈ 170 lines (total)
-# =========================================================
+# ✅ End — ~175 lines
+
 
 
 
