@@ -20,16 +20,28 @@ def load_data():
 
 stats_df = load_data()
 
-# Player Selection
-player_a = st.selectbox("Select Player A", sorted(stats_df["player"].unique()), key="a")
-player_b = st.selectbox("Select Player B", sorted(stats_df["player"].unique()), key="b")
+# Ensure at least two players are available
+available_players = sorted(stats_df["player"].unique())
+default_player_a = available_players[0]
+default_player_b = available_players[1] if len(available_players) > 1 else available_players[0]
 
+# Player Selection
+player_a = st.selectbox("Select Player A", available_players, index=0, key="a")
+player_b = st.selectbox("Select Player B", available_players, index=1, key="b")
+
+# Check if players are different
 if player_a == player_b:
-    st.warning("Please select two different players.")
+    st.warning("Please select two different players to simulate.")
+    st.stop()
 
 # Get Serve/Return Stats
 def get_player_stats(player):
-    row = stats_df[(stats_df["player"] == player) & (stats_df["surface"] == surface) & (stats_df["tour"] == tour)]
+    row = stats_df[(stats_df["player"] == player) &
+                   (stats_df["surface"] == surface) &
+                   (stats_df["tour"] == tour)]
+    if row.empty:
+        st.error(f"No stats found for {player} on {surface} ({tour}).")
+        st.stop()
     return float(row["serve_win"].values[0]), float(row["return_win"].values[0])
 
 sa_serve, sa_return = get_player_stats(player_a)
@@ -126,5 +138,4 @@ if stake > 0:
 else:
     st.info("No +EV bet found.")
 
-# Done
 
